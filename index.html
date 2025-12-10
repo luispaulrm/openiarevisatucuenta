@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Analizador de cuentas hospitales y clínicas v.5</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              'brand-primary': '#0D1B2A',
+              'brand-secondary': '#1B263B',
+              'brand-accent': '#415A77',
+              'brand-light': '#778DA9',
+              'brand-text': '#E0E1DD',
+              'brand-cyan': '#00BFFF',
+            },
+          },
+        },
+      }
+    </script>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "react-markdown": "https://aistudiocdn.com/react-markdown@^10.1.0",
+    "remark-gfm": "https://aistudiocdn.com/remark-gfm@^4.0.1",
+    "react-dropzone": "https://aistudiocdn.com/react-dropzone@^14.3.8",
+    "express": "https://aistudiocdn.com/express@^5.1.0",
+    "cors": "https://aistudiocdn.com/cors@^2.8.5",
+    "multer": "https://aistudiocdn.com/multer@^2.0.2",
+    "dotenv": "https://aistudiocdn.com/dotenv@^17.2.3",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.29.0",
+    "path": "https://aistudiocdn.com/path@^0.12.7",
+    "vite": "https://aistudiocdn.com/vite@^7.2.2",
+    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.0",
+    "process": "https://aistudiocdn.com/process@^0.11.10",
+    "url": "https://aistudiocdn.com/url@^0.11.4",
+    "buffer": "https://aistudiocdn.com/buffer@^6.0.3",
+    "pdfjs-dist": "https://aistudiocdn.com/pdfjs-dist@^5.4.449"
+  }
+}
+</script>
+<style>
+  html, body {
+    /* Permitir crecimiento libre, min-height asegura que cubra al menos la pantalla */
+    min-height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden; /* Prevent horizontal scroll on layout breaks */
+    background-color: #0D1B2A; /* Coincide con brand-primary */
+  }
+  #root {
+    min-height: 100%;
+    width: 100%;
+  }
+</style>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body class="bg-brand-primary text-brand-text">
+    <div id="root"></div>
+    <!-- jsPDF Core Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <!-- jsPDF AutoTable plugin -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,5 @@
+{
+  "name": " V.5 Analizador de cuentas hospitales y clínicas ",
+  "description": "Una aplicación web impulsada por IA para realizar análisis forenses detallados en documentos de facturación médica. Puede procesar cuentas de pacientes generales y Programas de Atención Médica (PAM) especializados, extrayendo y estructurando datos con alta precisión.",
+  "requestFramePermissions": []
+}

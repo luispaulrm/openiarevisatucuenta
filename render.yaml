@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: document-analyzer-app
+    env: node
+    plan: free
+    buildCommand: "npm install && npm run build && mv dist backend/public && cd backend && npm install && npm run build"
+    startCommand: "cd backend && node dist/index.js"
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: API_KEY
+        sync: false
