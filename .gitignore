@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local Google Vision credentials
+backend/keys/gcloud-vision.json
