@@ -1,139 +1,190 @@
-import express from 'express';
-import cors from 'cors';
-import multer from 'multer';
-import * as dotenv from 'dotenv';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { analyzePdfWithOpenAI, UploadedFile } from './openaiService';
-import { generateStableAuditReport } from './auditService';
-import { GENERAL_ANALYSIS_PROMPT, PAM_ANALYSIS_PROMPT, CONTRACT_ANALYSIS_PROMPT, GENERAL_ANALYSIS_SCHEMA, PAM_ANALYSIS_SCHEMA, CONTRACT_ANALYSIS_SCHEMA } from './constants';
-import { AuditRequest } from './types';
+import express from "express";
+import cors from "cors";
+import multer from "multer";
+import path from "path";
+import dotenv from "dotenv";
+import { jsonrepair } from "jsonrepair";
+import OpenAI from "openai";
+import vision from "@google-cloud/vision";
 
-// Configuración robusta de variables de entorno
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Intentar cargar .env desde la raíz del proyecto
-dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+// Load environment variables (local overrides .env and fallback to process env)
+dotenv.config({ path: path.resolve(__dirname, "../.env.local") });
+dotenv.config({ path: path.resolve(__dirname, "../.env") });
 dotenv.config();
 
+const PORT = parseInt(process.env.PORT || "3001", 10);
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4.1";
+const openaiKey = process.env.OPENAI_API_KEY;
+
+const openaiClient = openaiKey ? new OpenAI({ apiKey: openaiKey }) : null;
+const visionClient = new vision.ImageAnnotatorClient();
+
 const app = express();
-// Default to 3001 but allow override
-const port = parseInt(process.env.PORT || '3001', 10);
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 },
+});
 
 app.use(cors());
-// Explicitly cast to any to avoid "No overload matches this call" due to type mismatches in middleware definitions
-app.use(express.json({ limit: '50mb' }) as any);
+app.use(express.json({ limit: "15mb" }));
 
-(process as any).setMaxListeners(20);
-
-const storage = multer.memoryStorage();
-const upload = multer({ 
-    storage: storage,
-    limits: { fileSize: 50 * 1024 * 1024 } // 50MB limit explicitly
+app.get("/health", (_req, res) => {
+  res.json({
+    ok: true,
+    openai: !!openaiClient,
+    vision: true,
+    model: OPENAI_MODEL,
+  });
 });
-// Health Check Endpoint
-app.get('/api/health', (req: any, res: any) => {
-    res.json({ 
-        status: 'ok', 
-        apiKeyConfigured: !!process.env.OPENAI_API_KEY,
-        model: process.env.OPENAI_MODEL || 'gpt-4.1-mini'
+
+app.post("/ocr-pdf", upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file?.buffer) {
+      return res.status(400).json({ ok: false, error: "Falta archivo 'file'." });
+    }
+
+    const [result] = await visionClient.documentTextDetection({
+      image: { content: req.file.buffer },
     });
+
+    const text = result.fullTextAnnotation?.text || "";
+    console.log("[OCR] Texto extraído:", text.length, "caracteres");
+
+    res.json({ ok: true, text });
+  } catch (error: any) {
+    console.error("[OCR ERROR]", error?.message || error);
+    res.status(500).json({
+      ok: false,
+      error: "Error al procesar OCR con Google Vision.",
+      details: error?.message || String(error),
+    });
+  }
 });
 
-// Casting upload.array to any to resolve TypeScript overload mismatch with Express RequestHandler
-app.post('/api/analyze/:type', upload.array('files') as any, async (req: any, res: any) => {
-    const { type } = req.params;
-    console.log(`[Backend] Solicitud de analisis recibida: ${type}`);
-    
-    if (!process.env.OPENAI_API_KEY) {
-        console.error("[Backend] ERROR: OPENAI_API_KEY no configurada.");
-        res.status(500).json({ error: 'Servidor no configurado (Falta API Key).' });
-        return;
+app.post("/openai", async (req, res) => {
+  try {
+    if (!openaiClient) {
+      return res.status(500).json({
+        ok: false,
+        error: "OPENAI_API_KEY no está configurada en el servidor.",
+      });
     }
 
-    const filesFromRequest = (req as any).files;
-    if (!filesFromRequest || !Array.isArray(filesFromRequest) || filesFromRequest.length === 0) {
-        console.warn("[Backend] Solicitud sin archivos.");
-        res.status(400).json({ error: 'No se recibieron archivos.' });
-        return;
+    const { prompt, system, temperature = 0.1, maxTokens = 2000 } = req.body || {};
+    if (!prompt) {
+      return res.status(400).json({
+        ok: false,
+        error: "Debes enviar 'prompt' en el cuerpo de la petición.",
+      });
     }
 
-    const files = filesFromRequest as UploadedFile[];
-    console.log(`[Backend] Procesando ${files.length} archivo(s) para ${type}...`);
-    
+    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
+    if (system) {
+      messages.push({ role: "system", content: system });
+    }
+    messages.push({ role: "user", content: prompt });
+
+    const completion = await openaiClient.chat.completions.create({
+      model: OPENAI_MODEL,
+      messages,
+      temperature,
+      max_tokens: Math.min(maxTokens, 4000),
+    });
+
+    const content = completion.choices?.[0]?.message?.content || "";
+    console.log("[OPENAI] Tokens usados:", completion.usage);
+
+    res.json({
+      ok: true,
+      content,
+      usage: completion.usage,
+    });
+  } catch (error: any) {
+    console.error("[OPENAI ERROR]", error?.message || error);
+    res.status(500).json({
+      ok: false,
+      error: "Error al llamar a OpenAI.",
+      details: error?.message || String(error),
+    });
+  }
+});
+
+app.post("/ocr-and-analyze", upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file?.buffer) {
+      return res.status(400).json({ ok: false, error: "Falta archivo 'file'." });
+    }
+
+    if (!openaiClient) {
+      return res.status(500).json({
+        ok: false,
+        error: "OPENAI_API_KEY no está configurada en el servidor.",
+      });
+    }
+
+    const {
+      systemPrompt,
+      userPrompt,
+      temperature = 0.1,
+      maxTokens = 2000,
+    } = req.body || {};
+
+    const [ocrResult] = await visionClient.documentTextDetection({
+      image: { content: req.file.buffer },
+    });
+    const ocrText = ocrResult.fullTextAnnotation?.text || "";
+
+    const systemMessage =
+      systemPrompt ||
+      "Eres un auditor experto en cuentas clínicas chilenas. Analiza el texto y responde siguiendo las indicaciones del usuario.";
+
+    const userMessage =
+      userPrompt ||
+      "Usa el texto OCR para devolver un JSON bien estructurado e identificable.";
+
+    const finalPrompt = `${userMessage}\n\n=== TEXTO OCR ===\n${ocrText}`;
+
+    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+      { role: "system", content: systemMessage },
+      { role: "user", content: finalPrompt },
+    ];
+
+    const completion = await openaiClient.chat.completions.create({
+      model: OPENAI_MODEL,
+      messages,
+      temperature,
+      max_tokens: Math.min(maxTokens, 4000),
+    });
+
+    const rawContent = completion.choices?.[0]?.message?.content || "";
+    let repairedJson: any = null;
     try {
-        let result: any;
-        
-        if (type === 'bill') {
-            const file = files[0];
-            if (files.length > 1) {
-                console.warn("[Backend] Se recibieron multiples archivos para 'bill'; solo se analiza el primero.");
-            }
-            result = await analyzePdfWithOpenAI(
-                file,
-                GENERAL_ANALYSIS_PROMPT,
-                JSON.stringify(GENERAL_ANALYSIS_SCHEMA)
-            );
-        } else if (type === 'pam') {
-            const pamResponses = await Promise.all(
-                files.map(file =>
-                    analyzePdfWithOpenAI(
-                        file,
-                        PAM_ANALYSIS_PROMPT,
-                        JSON.stringify(PAM_ANALYSIS_SCHEMA)
-                    )
-                )
-            );
-            result = pamResponses.flat();
-        } else if (type === 'contract') {
-            result = await Promise.all(
-                files.map(file =>
-                    analyzePdfWithOpenAI(
-                        file,
-                        CONTRACT_ANALYSIS_PROMPT,
-                        JSON.stringify(CONTRACT_ANALYSIS_SCHEMA)
-                    )
-                )
-            );
-        } else {
-            res.status(400).json({ error: 'Tipo de analisis no valido.' });
-            return;
-        }
-        
-        console.log(`[Backend] Analisis ${type} exitoso. Enviando respuesta.`);
-        res.json(result);
-    } catch (error) {
-        console.error(`[Backend] Error critico en ${type}:`, error);
-        const errorMessage = error instanceof Error ? error.message : "Error desconocido en backend.";
-        res.status(500).json({ error: errorMessage });
+      const repaired = jsonrepair(rawContent);
+      repairedJson = JSON.parse(repaired);
+    } catch {
+      repairedJson = null;
     }
-});
-app.post('/api/audit', async (req: any, res: any) => {
-    console.log(`[Backend] ⚖️ Iniciando Auditoría...`);
-    const { billResult, pamResult, contractResult, previousAuditMarkdown, sameDataFlag } = req.body as AuditRequest;
-    try {
-        const report = await generateStableAuditReport(billResult, pamResult, contractResult, previousAuditMarkdown, sameDataFlag);
-        console.log(`[Backend] ✅ Auditoría generada.`);
-        res.json(report);
-    } catch (error) {
-        console.error('[Backend] ❌ Error auditoría:', error);
-        res.status(500).json({ error: error instanceof Error ? error.message : "Error desconocido" });
-    }
-});
 
-const staticFilesPath = path.join(__dirname, '..', 'public');
-app.use(express.static(staticFilesPath) as any);
-
-app.get('*', (req: any, res: any) => {
-  res.sendFile(path.join(staticFilesPath, 'index.html'));
+    res.json({
+      ok: true,
+      ocrText,
+      openaiRaw: rawContent,
+      openaiJson: repairedJson,
+      usage: completion.usage,
+    });
+  } catch (error: any) {
+    console.error("[OCR+OPENAI ERROR]", error?.message || error);
+    res.status(500).json({
+      ok: false,
+      error: "Error en el flujo OCR + OpenAI.",
+      details: error?.message || String(error),
+    });
+  }
 });
 
-// Listen on 0.0.0.0 to be accessible externally/in containers
-app.listen(port, '0.0.0.0', () => {
-    console.log(`\n==================================================`);
-    console.log(`🚀 SERVIDOR BACKEND ACTIVO`);
-    console.log(`📡 Escuchando en: http://0.0.0.0:${port}`);
-    console.log(`🔑 OPENAI API Key: ${process.env.OPENAI_API_KEY ? 'CONFIGURADA ✅' : 'FALTANTE ❌'}`);
-    console.log(`==================================================\n`);
+app.listen(PORT, () => {
+  console.log("\n==================================================");
+  console.log(`✅ Backend RevisaTuCuenta escuchando en puerto ${PORT}`);
+  console.log(`OPENAI configurado: ${!!openaiClient}`);
+  console.log(`==================================================\n`);
 });
