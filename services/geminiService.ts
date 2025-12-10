@@ -16,9 +16,15 @@ import * as pdfjsLib from 'pdfjs-dist';
 // Configure PDF.js worker (uses CDN to avoid complex Vite worker config in this setup)
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
-// Initialize the API client using the environment variable injected by Vite.
-const apiKey = process.env.API_KEY || '';
-const ai = new GoogleGenAI({ apiKey });
+// Initialize Gemini client using any of the supported env var names (Vite + Node fallback)
+const apiKey =
+  import.meta.env?.VITE_GEMINI_API_KEY ||
+  import.meta.env?.VITE_API_KEY ||
+  process.env.VITE_GEMINI_API_KEY ||
+  process.env.API_KEY ||
+  process.env.GEMINI_API_KEY ||
+  '';
+const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
 // Models for Two-Phase Analysis
 const FAST_MODEL = 'gemini-2.5-flash';
@@ -118,7 +124,9 @@ const analyzeFilesWithCache = async (files: File[], prompt: string, schema: any,
       }
   }
 
-  if (!apiKey) throw new Error("API Key no configurada (Verificar .env)");
+  if (!ai || !apiKey) {
+    throw new Error("API Key no configurada (define VITE_GEMINI_API_KEY en tu .env.local).");
+  }
 
   const fileParts = await Promise.all(validFiles.map(fileToPart));
 

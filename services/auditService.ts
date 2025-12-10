@@ -10,8 +10,14 @@ import {
     AUDIT_RECONCILIATION_SCHEMA
 } from '../constants';
 
-const apiKey = process.env.API_KEY || '';
-const ai = new GoogleGenAI({ apiKey });
+const apiKey =
+  import.meta.env?.VITE_GEMINI_API_KEY ||
+  import.meta.env?.VITE_API_KEY ||
+  process.env.VITE_GEMINI_API_KEY ||
+  process.env.API_KEY ||
+  process.env.GEMINI_API_KEY ||
+  '';
+const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
 // Use Pro model for reasoning tasks like Audit
 const MODEL_NAME = 'gemini-2.5-pro'; 
@@ -34,6 +40,10 @@ const generateRawAuditReport = async (
     .replace("{pam_json}", pamJson)
     .replace("{contrato_json}", contratoJson);
 
+  if (!ai) {
+    throw new Error("API Key no configurada (define VITE_GEMINI_API_KEY en tu .env.local).");
+  }
+
   try {
     const response = await ai.models.generateContent({
       model: MODEL_NAME,
@@ -55,7 +65,9 @@ export const generateStableAuditReport = async (
   // previousAuditMarkdown is ignored in the Twin Engine architecture as we always generate fresh pairs
   _ignoredPrevious?: string | null 
 ): Promise<StableAuditResult> => {
-    if (!apiKey) throw new Error("API Key no configurada.");
+    if (!ai) {
+        throw new Error("API Key no configurada (define VITE_GEMINI_API_KEY en tu .env.local).");
+    }
 
     // 1. Twin Engine Execution (Parallel Audits with different seeds)
     console.log("🚀 Iniciando Motor Twin-Engine (Auditor A + Auditor B)...");
